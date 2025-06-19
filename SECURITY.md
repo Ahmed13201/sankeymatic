@@ -11,7 +11,7 @@ Our team provides security assistance for the most recent stable version of the 
 ### Reporting Security Issues
 If you come across a security vulnerability within this project, please adhere to the following guidelines:
 1. **Avoid creating a public problem report.**
-2. **Instead, reach out to us via email at**: [your-email@example.com] _(Substitute with your chosen security contact email)_
+2. **Instead, reach out to us via email at**: [ahmed.batrun@gmail.com] _(Substitute with your chosen security contact email)_
 
 When reporting, include:
 - A detailed description of the vulnerability
