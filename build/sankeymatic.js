@@ -222,8 +222,8 @@ function contrasting_gray_color(hc) {
 // and for reflecting the user's input back to them in messages.
 function escapeHTML(unsafeString) {
   return unsafeString
-     .replaceAll('→', '&#8594;')
      .replaceAll('&', '&amp;')
+     .replaceAll('→', '&#8594;')
      .replaceAll('<', '&lt;')
      .replaceAll('>', '&gt;')
      .replaceAll('"', '&quot;')
