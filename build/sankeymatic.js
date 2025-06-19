@@ -367,7 +367,7 @@ glob.saveDiagramAsSVG = () => {
     .replace(/ class="svg_background_[a-z]+"/, '')
     // Add a title placeholder & credit comment after the FIRST tag:
     .replace(
-      />/,
+      />/g,
       '>\r\n<title>Your Diagram Title</title>\r\n'
           + `<!-- Generated with SankeyMATIC: ${glob.humanTimestamp()} -->\r\n`
       )
