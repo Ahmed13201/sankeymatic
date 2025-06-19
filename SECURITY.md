@@ -31,9 +31,3 @@ Our project actively aligns with OpenSSF's recommended security practices. Key m
 - ✅ A security policy document (`SECURITY.md`)
 - ✅ Utilization of Dependabot for automated dependency upgrades
 - ✅ Clearly defined release procedures with intermediate review stages
-- 🔜 Upcoming implementation of threat modeling and fuzz testing
-
-### PGP Key Verification
-In the future, releases may be signed with a PGP key. Instructions for verification will be provided once this feature is active.
-
-Your assistance in upholding the safety and integrity of this project is greatly appreciated. Thank you!
