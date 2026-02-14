@@ -35,6 +35,20 @@ function flatten(s) { return s.replaceAll('\\n', ' '); }
  */
 function singleQuote(s) { return `‘${s}’`; }
 
+/**
+ * Escape a string for safe insertion into HTML content/attributes.
+ * @param {string} s
+ * @returns string
+ */
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // togglePanel: Called directly from the page.
 // Given a panel's name, hide or show that control panel.
 glob.togglePanel = (panel) => {
@@ -2791,8 +2805,9 @@ ${escapeHTML(ef.target.logName ?? ef.target.tipName)}${unknownMsg}`
       decimalPlaces: maxDecimalPlaces,
       // 'trimString' = string to be used in the d3.format expression later:
       trimString: approvedCfg.labelvalue_fullprecision ? '' : '~',
-      prefix: approvedCfg.value_prefix,
-      suffix: approvedCfg.value_suffix,
+      // Prefix/suffix may contain user-provided text: escape to keep HTML safe.
+      prefix: escapeHtml(approvedCfg.value_prefix),
+      suffix: escapeHtml(approvedCfg.value_suffix),
     };
 
   // Deal with inheritance swap if graph is reversed:
