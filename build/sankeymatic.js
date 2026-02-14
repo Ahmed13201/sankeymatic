@@ -21,6 +21,20 @@ Requires:
 function el(domId) { return document.getElementById(domId); }
 function elV(domId) { return document.getElementById(domId).value; }
 
+/**
+ * Change "\n" to a space instead of a newline. (Used in logging, tooltips)
+ * @param {string} s
+ * @returns string
+ */
+function flatten(s) { return s.replaceAll('\\n', ' '); }
+
+/**
+ * Put fancy single quotes around a string
+ * @param {string} s
+ * @returns string
+ */
+function singleQuote(s) { return `‘${s}’`; }
+
 // togglePanel: Called directly from the page.
 // Given a panel's name, hide or show that control panel.
 glob.togglePanel = (panel) => {
@@ -228,7 +242,9 @@ function escapeHTML(unsafeString) {
      .replaceAll('>', '&gt;')
      .replaceAll('"', '&quot;')
      .replaceAll("'", '&#039;')
-     .replaceAll('\n', '<br />');
+     .replaceAll("‘", '&lsquo;')
+     .replaceAll("’", '&rsquo;')
+     .replaceAll('\n', '<br>');
 }
 
 // ep = "Enough Precision". Converts long decimals to have just 5 digits.
@@ -395,8 +411,8 @@ function flatFlowPathMaker(f) {
   // [M]ove to the flow source's top; draw a [v]ertical line down,
   // a [L]ine to the opposite corner, a [v]ertical line up,
   // then [z] close.
-  return `M${ep(sx)} ${ep(syTop)}v${ep(f.dy)}`
-    + `L${ep(tx)} ${ep(tyBot)}v${ep(-f.dy)}z`;
+  return `M${ep(sx)} ${ep(syTop)}v${ep(f.dy)}\
+L${ep(tx)} ${ep(tyBot)}v${ep(-f.dy)}z`;
 }
 
 // curvedFlowPathFunction(curvature):
@@ -431,8 +447,8 @@ function curvedFlowPathFunction(curvature) {
     // Draw a Bezier [C]urve using control points [xcp1,syC] & [xcp2,tyC]
     // End at the center of the flow's target [tx,tyC]
     return (
-      `M${ep(sEnd)} ${ep(syC)}C${ep(xcp1)} ${ep(syC)} `
-        + `${ep(xcp2)} ${ep(tyC)} ${ep(tStart)} ${ep(tyC)}`
+      `M${ep(sEnd)} ${ep(syC)}C${ep(xcp1)} ${ep(syC)} \
+${ep(xcp2)} ${ep(tyC)} ${ep(tStart)} ${ep(tyC)}`
     );
   };
 }
@@ -1003,16 +1019,16 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
 
   // shadowFilter(i): true/false value indicating whether to display an item.
   // Normally shadows are hidden, but the revealshadows flag can override.
-  // i can be either a node or a flow.
+  // i can be either a node OR a flow.
   function shadowFilter(i) {
     return !i.isAShadow || cfg.internal_revealshadows;
   }
 
   if (cfg.internal_revealshadows) {
-    // Add a usable tipname since they'll be used (i.e. avoid 'undefined'):
+    // Add a usable tipName since they'll be used (i.e. avoid 'undefined'):
     allNodes
       .filter((n) => n.isAShadow)
-      .forEach((n) => { n.tipname = '(shadow)'; });
+      .forEach((n) => { n.tipName = '(shadow)'; });
   }
   // MARK Label-measuring time
   // Depending on where labels are meant to be placed, we measure their
@@ -1021,7 +1037,9 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
 
   /**
    * Given a Node, list all the label pieces we'll need to display.
-   * Also, scale their sizes according to the user's instructions.
+   * This usually includes the displayName & value, but various settings
+   * and attributes affect that.
+   * Also, scale their relative sizes according to the user's instructions.
    * @param {object} n - Node we are making the label for
    * @param {number} magnification - amount to scale this entire label
    * @returns {textFragment[]} List of text items
@@ -1032,9 +1050,13 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
       relativeSizeAdjustment = (cfg.labels_relativesize - 100) / 100,
       nameSize = overallSize * (1 - relativeSizeAdjustment),
       valueSize = overallSize * (1 + relativeSizeAdjustment),
-      nameParts = String(n.name).split('\\n'), // Use \n for multiline labels
+      displayName = n.displayName ?? n.name, // Use the custom label if defined
+      nameParts = displayName === ''
+        ? []
+        : String(displayName).split('\\n'), // Use \n for multiline labels
       nameObjs = nameParts.map((part, i) => ({
-        txt: part,
+        // 160 = NBSP which prevents the collapsing of empty lines:
+        txt: part || String.fromCharCode(160),
         weight: cfg.labelname_weight,
         size: nameSize,
         newLine: i > 0
@@ -1046,7 +1068,11 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
         size: valueSize,
         newLine: (cfg.labelname_appears && cfg.labelvalue_position === 'below'),
       };
-    if (!cfg.labelvalue_appears) { return nameObjs; }
+    if (!cfg.labelvalue_appears) {
+      // If no values && name is also blank, hide the whole label:
+      if (nameObjs.length === 0) { n.hideWholeLabel = true; }
+      return nameObjs;
+    }
     if (!cfg.labelname_appears) { return [valObj]; }
     switch (cfg.labelvalue_position) {
       case 'before': // separate the value from the name with 1 space
@@ -1095,7 +1121,7 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
   // Set up label information for each Node:
   if (cfg.labelname_appears || cfg.labelvalue_appears) {
     allNodes.filter(shadowFilter)
-      .filter((n) => !n.hideLabel)
+      .filter((n) => !n.hideWholeLabel)
       .forEach((n) => {
         const totalRange = (Math.abs(cfg.labels_magnify - 100) * 2) / 100,
           nFactor = nodeScaleFn(n.value),
@@ -1107,6 +1133,11 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
             = cfg.labels_magnify === 100 ? 1 : 1 + nodePositionInRange,
           id = `label${n.index}`; // label0, label1..
         n.labelList = getLabelPieces(n, magnifyLabel);
+        if (n.labelList.length === 0) {
+          // If nothing to show after all, hide this one:
+          n.hideWholeLabel = true;
+          return;
+        }
         n.label = {
           dom_id: id,
           anchor: labelAnchor(n),
@@ -1243,7 +1274,7 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
     // Everything with this class value will move with the Node when it is
     // dragged:
     n.css_class = `for_${n.dom_id}`; // for_r0, for_r1...
-    n.tooltip = `${n.tipname}:\n${withUnits(n.value)}`;
+    n.tooltip = `${n.tipName}:\n${withUnits(n.value)}`;
     n.opacity = n.opacity || cfg.node_opacity;
 
     // Fill in any missing Node colors. (Flows may inherit from these.)
@@ -1254,7 +1285,7 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
       // If there are no non-blank strings in the node name, substitute
       // a word-ish value (rather than crash):
       const colorKeyString
-        = (n.tipname?.match(/^\s*(\S+)/) || [null, 'name-is-blank'])[1];
+        = (n.tipName?.match(/^\s*(\S+)/) || [null, 'name-is-blank'])[1];
       // Don't use up colors on shadow nodes:
       n.color = n.isAShadow ? colorGray60 : colorScaleFn(colorKeyString);
     }
@@ -1263,7 +1294,7 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
       = darkBg ? d3.rgb(n.color).brighter(2) : d3.rgb(n.color).darker(2);
 
     // Set up label presentation values:
-    if (n.labelList?.length && !n.hideLabel) {
+    if (n.labelList?.length && !n.hideWholeLabel) {
       // Which side of the node will the label be on?
       switch (n.label.anchor) {
         case 'start': n.label.x = n.x + n.dx + pad.lblMarginAfter; break;
@@ -1298,7 +1329,7 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
     .forEach((f) => {
     f.dom_id = `flow${f.index}`; // flow0, flow1...
     f.tooltip
-      = `${f.source.tipname} → ${f.target.tipname}: ${withUnits(f.value)}`;
+      = `${f.source.tipName} → ${f.target.tipName}: ${withUnits(f.value)}`;
     // Fill in any missing opacity values and the 'hover' counterparts:
     f.opacity = f.opacity || cfg.flow_opacity;
     // Hover opacity = halfway between the user's opacity and 1.0:
@@ -1527,8 +1558,8 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
       // [m]ove down by this node's height
       // [H]orizontal line back to the left edge (x=0)
       // ..Then the same operation [v]ertically, using this node's width.
-      .attr('d', `M0 ${ep(n.lastPos.y)} h${ep(graph.w)} m0 ${ep(n.dy)} H0`
-           + `M${ep(n.lastPos.x)} 0 v${ep(graph.h)} m${ep(n.dx)} 0 V0`)
+      .attr('d', `M0 ${ep(n.lastPos.y)} h${ep(graph.w)} m0 ${ep(n.dy)} H0\
+M${ep(n.lastPos.x)} 0 v${ep(graph.h)} m${ep(n.dx)} 0 V0`)
       .attr('stroke', grayColor)
       .attr('stroke-width', 1)
       .attr('stroke-dasharray', '1 3')
@@ -1714,7 +1745,7 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
     diagLabels.selectAll()
       .data(allNodes.filter(shadowFilter))
       .enter()
-      .filter((n) => !n.hideLabel)
+      .filter((n) => !n.hideWholeLabel)
       .append('text')
         .attr('id', (n) => n.label.dom_id)
         // Associate this label with its Node using the CSS class:
@@ -1959,9 +1990,9 @@ function loadFromQueryString() {
       } else {
         // Tell the user something went wrong:
         msg.addToQueue(
-          `The input string provided in the URL (${highlightSafeValue(
-            `${compressedInputs.substring(0, 8)}...`
-          )}) was not decodable.`,
+          `The input string provided in the URL
+(${highlightSafeValue(`${compressedInputs.substring(0, 8)}...`)})
+was not decodable.`,
           'issue'
         );
       }
@@ -1979,11 +2010,10 @@ glob.process_sankey = () => {
   // Update the display of all known themes given their offsets:
   function updateColorThemeDisplay() {
     // template string for the color swatches:
-    const makeSpanTag = (color, count, themeName) => (
-      `<span style="background-color: ${color};" `
-      + `class="color_sample_${count}" `
-      + `title="${color} from d3 color scheme ${themeName}">`
-      + '&nbsp;</span>'
+    const makeSpanTag = (swRGB, themeSize, themeName) => (
+      `<span class="color_sample_${themeSize}" \
+title="${swRGB} from d3 color scheme ${themeName}" \
+style="background-color: ${swRGB};">&nbsp;</span>`
     );
     for (const t of colorThemes.keys()) {
       const theme = approvedColorTheme(t),
@@ -2008,13 +2038,13 @@ glob.process_sankey = () => {
    * @param {string} rawName a node name from the input data
    * @returns {object} nameInfo
    * @returns {string} nameInfo.trueName The real node name (without dashes)
-   * @returns {boolean} nameInfo.hideLabel True if the name was struck through
+   * @returns {boolean} nameInfo.hideWholeLabel True if the name was -struck-
    */
   function parseNodeName(rawName) {
     const hiddenNameMatches = rawName.match(/^-(.*)-$/),
       hideThisLabel = hiddenNameMatches !== null,
       trueName = hideThisLabel ? hiddenNameMatches[1] : rawName;
-    return { trueName: trueName, hideLabel: hideThisLabel };
+    return { trueName: trueName, hideWholeLabel: hideThisLabel };
   }
 
   /**
@@ -2027,26 +2057,66 @@ glob.process_sankey = () => {
    * @returns {object} The node's object (from uniqueNodes)
    */
   function setUpNode(nodeName, row) {
-    const { trueName, hideLabel } = parseNodeName(nodeName),
-      thisNode = uniqueNodes.get(trueName); // Does this node exist?
+    const { trueName, hideWholeLabel } = parseNodeName(nodeName),
+      thisNode = uniqueNodes.get(trueName); // Does this node already exist?
     if (thisNode) {
       // If so, should the new row # replace the stored row #?:
       if (thisNode.sourceRow > row) { thisNode.sourceRow = row; }
-      // Update hideLabel if this instance of the name was struck through:
-      thisNode.hideLabel ||= hideLabel;
+      // Update hideWholeLabel if *this* instance of the name was -struck-:
+      thisNode.hideWholeLabel ||= hideWholeLabel;
       return thisNode;
     }
     // This is a new Node. Set up its object, keyed to its trueName:
     const newNode = {
       name: trueName,
-      tipname: trueName.replaceAll('\\n', ' '),
-      hideLabel: hideLabel,
+      tipName: flatten(trueName),
+      hideWholeLabel: hideWholeLabel,
       sourceRow: row,
       paintInputs: [],
       unknowns: { [IN]: new Set(), [OUT]: new Set() },
     };
     uniqueNodes.set(trueName, newNode);
     return newNode;
+  }
+
+  /**
+   * @typedef {Object} UnquotingResult
+   * @property {boolean} success
+   * @property {string} [data] - The result if successful
+   * @property {string} [message] - The error message on failure.
+   */
+
+  /**
+   * If the input is a quoted string, return the unquoted string.
+   * Treats double occurrences of quotes as escapes, to allow strings
+   * such as '"Al''s Share"'
+   * @param {string} inString
+   * @returns {UnquotingResult} result
+   */
+
+  function tryUnquotingString(inString) {
+    const reFindQuotes = /^(?<quoteChar>['"])(?<innerString>.*)\1$/,
+      matches = inString.match(reFindQuotes);
+
+    // If no outer quotes were found, that's still valid:
+    if (!matches) { return { success: true, data: inString }; }
+
+    // Here, a valid outer quote pair was found.
+    const { quoteChar, innerString } = matches.groups,
+      twoQuotes = quoteChar + quoteChar;
+    // After removing all doubled quotes, 0 quoteChars should be left:
+    if (innerString.replaceAll(twoQuotes, '').includes(quoteChar)) {
+      return {
+        success: false,
+        message: 'Use 2 consecutive quotes inside a quoted string'
+      };
+    }
+
+    return {
+      success: true,
+      // Turn all doubled quotes into singles:
+      data: innerString.replaceAll(twoQuotes, quoteChar),
+    };
   }
 
   // updateNodeAttrs: Update an existing node's attributes.
@@ -2058,8 +2128,8 @@ glob.process_sankey = () => {
     // the big list:
     const thisNode = setUpNode(nodeParams.name, nodeParams.sourceRow);
 
-    // We've already used the 'sourceRow' value and don't want it to
-    // overwrite anything, so take it out of the params object:
+    // Don't overwrite the 'name' or 'sourceRow' values after setUpNode
+    delete nodeParams.name;
     delete nodeParams.sourceRow;
 
     // If there's a color and it's a color CODE, put back the #:
@@ -2068,9 +2138,43 @@ glob.process_sankey = () => {
       nodeParams.color = `#${nodeParams.color}`;
     }
 
-    // Don't overwrite the 'name' value here, it can mess up tooltips:
-    delete nodeParams.name;
+    // Is the user providing a custom label?
+    if (nodeParams.label) {
+      // If the label was quoted, process it to strip the quotes (and
+      // handle any inner quote characters):
+      const unquotingResult = tryUnquotingString(nodeParams.label);
 
+      // Check for an error & inform the user if so.
+      if (!unquotingResult.success) {
+        warnAbout(
+          nodeParams.label,
+          `In <code>label</code> for ${thisNode.name}:
+${unquotingResult.message}`
+        );
+      }
+
+      // Use the literal original value if unquoting was unsuccessful:
+      nodeParams.displayName = unquotingResult.data ?? nodeParams.label;
+      delete nodeParams.label; // We don't want an actual 'label' key around
+      if (nodeParams.displayName !== '') {
+        // Update the tooltip name to reflect the new display name:
+        nodeParams.tipName = flatten(nodeParams.displayName);
+        // For logging, make a string with the displayName AND the true name.
+        // (This helps in cases where nodes have the same displayName.)
+        nodeParams.logName
+          = `${singleQuote(nodeParams.tipName)} (${flatten(thisNode.name)})`;
+      } else {
+        // The custom label was an empty string. Write that to the node HERE
+        // (because blanks are not written by the loop below):
+        thisNode.displayName = '';
+        // Also reset tipName & logName, in case a previous label
+        // declaration wrote other values:
+        thisNode.tipName = flatten(thisNode.name);
+        delete thisNode.logName;
+      }
+    }
+
+    // For non-blank items remaining in nodeParams, copy them to thisNode:
     Object.entries(nodeParams).forEach(([pName, pVal]) => {
       if (typeof pVal !== 'undefined' && pVal !== null && pVal !== '') {
         thisNode[pName] = pVal;
@@ -2081,11 +2185,10 @@ glob.process_sankey = () => {
   // Go through lots of validation with plenty of bailout points and
   // informative messages for the poor soul trying to do this.
 
-  // Note: Checking the 'Transparent' background-color box *no longer* means
-  // that the background-color-picker is pointless; it still affects the color
-  // value which will be given to "Made with SankeyMATIC".
-  // Therefore, we no longer disable the Background Color element, even when
-  // 'Transparent' is checked.
+  // Note: Checking the 'Transparent' background-color box *does not* mean
+  // that the background-color is pointless; it still affects the color
+  // given to "Made with SankeyMATIC". Therefore the Background Color
+  // chooser is still active even when 'Transparent' is checked.
 
   // BEGIN by resetting all message areas & revealing any queued messages:
   msg.resetAll();
@@ -2113,7 +2216,7 @@ glob.process_sankey = () => {
   }
 
   // Search for Settings we can apply:
-  let currentSettingGroup = '';
+  let currentSettingGroup = '', currentObject = null;
   sourceLines.forEach((lineIn, row) => {
     // Is it a Move line?
     const moveParts = lineIn.match(reMoveLine);
@@ -2135,12 +2238,17 @@ glob.process_sankey = () => {
 
     // If either was found, let's process it:
     if (settingParts !== null) {
-      // We found something, so remember this row index:
-      linesWithSettings.add(row);
-
       // Derive the setting name we're looking at:
       let origSettingName = settingParts[1],
         settingName = origSettingName.replace(/\s+/g, '_');
+
+      // Avoid name collisions:
+      // If it's a setting with nothing but 'node' (i.e. no second part
+      // like 'node_w'), skip it. Those will be handled elsewhere.
+      if (settingName === NODE_OBJ) { return; }
+
+      // Here we did find something, so remember this row index:
+      linesWithSettings.add(row);
 
       // Syntactic sugar - if the user typed the long version of a word,
       // fix it up so it's just the 1st letter so it will work:
@@ -2185,8 +2293,20 @@ glob.process_sankey = () => {
           settingValue,
           `Invalid value for <strong>${origSettingName}<strong>`
         );
+      } else if (origSettingName.substring(0, 5) === `${NODE_OBJ} `) {
+        // A node declaration was attempted, but there were spaces:
+        const nodeWarningStem
+          = `<code><strong>node</strong> <em>ID</em></code> lines
+may not have spaces in <em>ID</em>.<br>&nbsp;`;
+        // (We have a stem because more warning types are coming.)
+        warnAbout(
+          lineIn,
+          `${nodeWarningStem}Use
+<code><strong>.label</strong> <em>display name</em></code>
+or <code><strong>:</strong><em>node name #color</em></code>`
+        );
       } else {
-        // There wasn't a setting matching this name:
+        // No setting matched this name:
         warnAbout(origSettingName, 'Not a valid setting name');
       }
     }
@@ -2215,23 +2335,38 @@ glob.process_sankey = () => {
   // Loop through all the non-setting input lines:
   sourceLines.filter((l, i) => !linesWithSettings.has(i))
     .forEach((lineIn, row) => {
-    // Is it a blank line OR a comment? Skip it entirely:
+    // Is it a blank line OR a comment? Skip it entirely
+    // (without resetting currentObject):
     if (lineIn === '' || reCommentLine.test(lineIn)) {
       return;
     }
 
-    // Does this line look like a Node?
-    let matches = lineIn.match(reNodeLine);
+    // Is this a Node line? (v1, Loose)
+    let matches = lineIn.match(reNodeLineLoose);
     if (matches !== null) {
+      let nodeName = matches[1].trim();
       // Save/update it in the uniqueNodes structure:
       updateNodeAttrs({
-        name: matches[1].trim(),
+        name: nodeName,
         color: matches[2],
         opacity: matches[3],
         paintInputs: [matches[4], matches[5]],
         sourceRow: row,
       });
-      // No need to process this as a Data line, let's move on:
+      currentObject = { type: NODE_OBJ, name: nodeName };
+      return;
+    }
+
+    // Is this a Node line? (v2, Strict)
+    matches = lineIn.match(reNodeLineStrict);
+    if (matches !== null) {
+      let nodeName = matches[1].trim();
+      // Save/update it in the uniqueNodes structure:
+      updateNodeAttrs({
+        name: nodeName,
+        sourceRow: row,
+      });
+      currentObject = { type: NODE_OBJ, name: nodeName };
       return;
     }
 
@@ -2240,10 +2375,15 @@ glob.process_sankey = () => {
     if (matches !== null) {
       const amountIn = matches[2].replace(/\s/g, ''),
         isCalculated = flowIsCalculated(amountIn);
+        // future: currentObject = { type: FLOW_OBJ, sourceRow: row };
+        currentObject = null;
 
       // Is the Amount actually blank? Treat that like a comment (but log it):
       if (amountIn === '') {
-        msg.log(`<span class="info_text">Skipped empty flow:</span> ${escapeHTML(lineIn)}`);
+        msg.log(
+          `<span class="info_text">Skipped empty flow:</span>
+${escapeHTML(lineIn)}`
+        );
         return;
       }
 
@@ -2252,7 +2392,8 @@ glob.process_sankey = () => {
       if (!isNumeric(amountIn) && !isCalculated) {
         warnAbout(
           lineIn,
-          `The [Amount] must be a number in the form #.# or a wildcard ("${SYM_USE_REMAINDER}" or "${SYM_FILL_MISSING}").`
+          `The [Amount] must be a number in the form #.# or a wildcard
+(<code>${SYM_USE_REMAINDER}</code> or <code>${SYM_FILL_MISSING}</code>)`
         );
         return;
       }
@@ -2282,10 +2423,40 @@ glob.process_sankey = () => {
       return;
     }
 
+    // Is this an Attribute line?
+    matches = lineIn.match(reAttributeLine);
+    if (matches !== null) {
+      if (!currentObject) {
+        warnAbout(
+          lineIn,
+          'Found an Attribute without a preceding Node declaration'
+        );
+        return;
+      }
+      const [_, attrName, attrValue] = matches;
+      // Verify that the attribute name is valid for currentObject's type:
+      if (!validAttributes.get(currentObject.type)?.has(attrName)) {
+        warnAbout(
+          lineIn,
+          `Attribute type <code>${attrName}</code> is not valid for Nodes`
+        );
+      } else if (currentObject.type === NODE_OBJ) {
+        // TODO: Verify the syntax of the value
+        // Apply the new value to the existing object:
+        updateNodeAttrs({
+          name: currentObject.name,
+          [attrName]: attrValue,
+        })
+      } else {
+        warnAbout(lineIn, `Unsupported object type '${currentObject.type}'`)
+      }
+      return;
+    }
+
     // This is a non-blank line which did not match any pattern:
     warnAbout(
       lineIn,
-      'Does not match the format of a Flow or Node or Setting'
+      'Does not match the format of a Flow, Node, Attribute, or Setting'
       );
   });
 
@@ -2379,7 +2550,10 @@ glob.process_sankey = () => {
   });
 
   if (queueOfFlows.size) {
-    msg.logOnce('declareCalculations', '<b>Resolving calculated flows.</b>');
+    msg.logOnce(
+      'declareCalculations',
+      '<strong>Resolving calculated flows:</strong>'
+    );
     // For each involvedNode: is it an endpoint or origin?
     // (Terminal nodes have an implicit additional unknown side.)
     // We'd rather check with n.flows[].length, but that's not set up yet.
@@ -2405,14 +2579,17 @@ glob.process_sankey = () => {
     // Special notifications regarding more ambiguous flows:
     let unknownMsg = '';
     if (unknownCt > 1) {
-      unknownMsg
-        = ` (&lsquo;${parentN.tipname}&rsquo; had ${unknownCt} unknowns)`;
+      unknownMsg = ` &mdash; <em>\
+${escapeHTML(parentN.logName ?? singleQuote(parentN.tipName))}
+had <strong>${unknownCt}</strong> unknowns</em>`;
       // Say - once! - that we are in Ambiguous Territory. (We do this here
       // because the very next console msg will mention the multiple unknowns.)
       msg.logOnce(
         'warnAboutAmbiguousFlows',
-        '<em>Note: Beyond this point, some flow amounts depended on multiple unknown values.<br>' +
-          'They will be resolved in the order of fewest unknowns + their order in the input data.</em>'
+        `<p><em>Note: Beyond this point, some flow amounts depended on
+<strong>multiple</strong> unknown values.<br>
+They will be resolved in the order of fewest unknowns + their order
+in the input data.</em></p>`
       );
     }
 
@@ -2444,16 +2621,17 @@ glob.process_sankey = () => {
     ef[k.arriving.node].unknowns[k.arriving.dir].delete(ef);
     queueOfFlows.delete(ef);
     msg.log(
-      `<span class="info_text">Calculated:</span> ${escapeHTML(
-        `${ef.source.tipname} [${ef.operation}] ${ef.target.tipname}`
-      )} = <span class="calced">${ep(ef.value)}</span>${unknownMsg}`
+      `<span class="info_text">Calculated:</span>
+${escapeHTML(ef.source.logName ?? ef.source.tipName)}
+[<code>${ef.operation} = <span class="calced">${ep(ef.value)}</span></code>]
+${escapeHTML(ef.target.logName ?? ef.target.tipName)}${unknownMsg}`
     );
   }
 
   /**
-   * Test whether a flow's parent has only 1 unknown value left.
+   * Test whether a flow's parent has exactly 1 unknown value left.
    * @param {object} flow - the specific flow to test
-   * @returns true when the unknown count for the flow's parent is exactly 1
+   * @returns {boolean}
    */
   function has_one_unknown(flow) { return parentUnknowns.get(flow) === 1; }
 
@@ -2481,9 +2659,8 @@ glob.process_sankey = () => {
       );
     });
     // Helpful for debugging - Array.from(parentUnknowns).sort((a, b) => a[1] - b[1])
-    //   .forEach((x) => console.log(`${x[0].source.tipname} ${x[0].operation}`
-    //     + ` ${x[0].target.tipname}: ${x[1]}`));
-    // console.log('');
+    //   .forEach((x) => console.log(
+    // `${x[0].source.tipName} ${x[0].operation} ${x[0].target.tipName}: ${x[1]}`));
 
     // Next, prioritize the flows by their count of unknowns (ascending),
     // then by sourceRow (ascending):
@@ -2650,8 +2827,9 @@ glob.process_sankey = () => {
         .sort((a, b) => b - a)
         .map((v) => withUnits(v))
         .join(' + ');
-    return `<dfn title="${formattedSum} from ${flowCt} `
-      + `Flows: ${breakdown}">${formattedSum}</dfn>`;
+    return `<dfn \
+title="${formattedSum} from ${flowCt} Flows: ${breakdown}"\
+>${formattedSum}</dfn>`;
   }
 
   // Given maxDecimalPlaces, we can derive the smallest important
@@ -2719,10 +2897,10 @@ glob.process_sankey = () => {
     // Make a nice table of the differences:
     differences.forEach((diffRec) => {
       differenceRows.push(
-        `<tr><td class="nodename">${escapeHTML(diffRec.name)}</td>`
-        + `<td>${diffRec.total[IN]}</td>`
-        + `<td>${diffRec.total[OUT]}</td>`
-        + `<td>${diffRec.difference}</td></tr>`
+        `<tr><td class="nodename">${escapeHTML(diffRec.name)}</td>\
+<td>${diffRec.total[IN]}</td>\
+<td>${diffRec.total[OUT]}</td>\
+<td>${diffRec.difference}</td></tr>`
       );
     });
     msg.add(
@@ -2732,19 +2910,18 @@ glob.process_sankey = () => {
   }
 
   // Reflect summary stats to the user:
-  let totalsMsg
-    = `<strong>${approvedFlows.length} Flows</strong> between `
-    + `<strong>${approvedNodes.length} Nodes</strong>. `;
+  let totalsMsg = `<strong>${approvedFlows.length} Flows</strong> between
+<strong>${approvedNodes.length} Nodes</strong>. `;
 
   // Do the totals match? If not, mention the different totals:
   if (Math.abs(grandTotal[IN] - grandTotal[OUT]) > epsilonDifference) {
     const gtLt = grandTotal[IN] > grandTotal[OUT] ? '&gt;' : '&lt;';
     totalsMsg
-      += `Total Inputs: <strong>${withUnits(grandTotal[IN])}</strong> ${gtLt}`
-      + ` Total Outputs: <strong>${withUnits(grandTotal[OUT])}</strong>`;
+      += `Total Inputs: <strong>${withUnits(grandTotal[IN])}</strong> ${gtLt}
+Total Outputs: <strong>${withUnits(grandTotal[OUT])}</strong>`;
   } else {
-    totalsMsg += 'Total Inputs = Total Outputs = '
-      + `<strong>${withUnits(grandTotal[IN])}</strong> &#9989;`;
+    totalsMsg += `Total Inputs = Total Outputs =
+<strong>${withUnits(grandTotal[IN])}</strong> &#9989;`;
   }
   msg.add(totalsMsg, 'total');
 
@@ -2766,8 +2943,8 @@ glob.process_sankey = () => {
       { ...numberStyle, decimalPlaces: 4 }
     );
   el('scale_figures').innerHTML
-    = `<strong>${unitsPerPixel}</strong> per pixel `
-    + `(${withUnits(maxNodeVal)}/${formattedPixelCount}px)`;
+    = `<strong>${unitsPerPixel}</strong> per pixel
+(${withUnits(maxNodeVal)}/${formattedPixelCount}px)`;
 
   updateResetNodesUI();
 
@@ -2786,13 +2963,14 @@ glob.process_sankey();
 
 // Make the linter happy about imported objects:
 /* global
- d3 canvg global IN OUT BEFORE AFTER MAXBREAKPOINT
+ d3 canvg global IN OUT BEFORE AFTER MAXBREAKPOINT NODE_OBJ
  sampleDiagramRecipes fontMetrics highlightStyles
  settingsMarker settingsAppliedPrefix settingsToBackfill
  userDataMarker sourceHeaderPrefix sourceURLLine
  skmSettings colorGray60 userInputsField breakpointField
  reWholeNumber reHalfNumber reInteger reDecimal reYesNo reYes
- reCommentLine reSettingsValue reSettingsText reNodeLine
+ reCommentLine reSettingsValue reSettingsText
+ reAttributeLine validAttributes reNodeLineLoose reNodeLineStrict
  reMoveLine movesMarker
  reFlowTargetWithSuffix reColorPlusOpacity
  reBareColor reRGBColor LZString */
