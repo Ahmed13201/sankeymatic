@@ -2957,9 +2957,17 @@ Total Outputs: <strong>${withUnits(grandTotal[OUT])}</strong>`;
       maxNodeVal / (tallestNodeHeight || Number.MIN_VALUE),
       { ...numberStyle, decimalPlaces: 4 }
     );
-  el('scale_figures').innerHTML
-    = `<strong>${unitsPerPixel}</strong> per pixel
-(${withUnits(maxNodeVal)}/${formattedPixelCount}px)`;
+  const scaleFiguresEl = el('scale_figures');
+  // Build the contents safely to avoid interpreting any dynamic text as HTML:
+  scaleFiguresEl.textContent = '';
+  const strongEl = document.createElement('strong');
+  strongEl.textContent = unitsPerPixel;
+  scaleFiguresEl.appendChild(strongEl);
+  scaleFiguresEl.appendChild(
+    document.createTextNode(
+      ` per pixel (${withUnits(maxNodeVal)}/${formattedPixelCount}px)`
+    )
+  );
 
   updateResetNodesUI();
 
